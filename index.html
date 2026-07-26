@@ -486,6 +486,11 @@
           <button class="pill" data-tool="deletePages">Delete pages</button>
           <button class="pill" data-tool="lock">Lock</button>
           <button class="pill" data-tool="unlock">Unlock</button>
+          <button class="pill" data-tool="officeToPdf">Office → PDF</button>
+          <button class="pill" data-tool="pdfToOffice">PDF → Office</button>
+          <button class="pill" data-tool="imagesToPdf">Images → PDF</button>
+          <button class="pill" data-tool="pdfToImages">PDF → Images</button>
+          <button class="pill" data-tool="ocr">OCR</button>
         </div>
 
         <div id="toolOptions" style="display:none; margin-bottom:16px;"></div>
@@ -709,27 +714,36 @@ let activeTool = 'merge';
 // Each tool: how many files it needs, idle copy, and an optional extra input
 // rendered above the dropzone (degrees / text / password).
 const TOOL_CONFIG = {
-  merge:      { multiple: true,  minFiles: 2, idle: 'Choose 2 or more PDFs to merge',   hint: "They'll be combined in the order you select them · processed on your own machine" },
-  split:      { multiple: false, minFiles: 1, idle: 'Choose a PDF to split into pages', hint: 'Every page comes back as its own file · processed on your own machine' },
-  rotate:     { multiple: false, minFiles: 1, idle: 'Choose a PDF to rotate',           hint: 'All pages rotate by the amount selected above',
+  merge:      { multiple: true,  minFiles: 2, idle: 'Choose 2 or more PDFs to merge',   hint: "They'll be combined in the order you select them · processed on your own machine", accept: 'application/pdf' },
+  split:      { multiple: false, minFiles: 1, idle: 'Choose a PDF to split into pages', hint: 'Every page comes back as its own file · processed on your own machine', accept: 'application/pdf' },
+  rotate:     { multiple: false, minFiles: 1, idle: 'Choose a PDF to rotate',           hint: 'All pages rotate by the amount selected above', accept: 'application/pdf',
     option: { type: 'buttons', id: 'degrees', label: 'Rotate by:', choices: [['90','90°'],['180','180°'],['270','270°']], default: '90' } },
-  compress:   { multiple: false, minFiles: 1, idle: 'Choose a PDF to compress',         hint: 'Strips metadata and optimizes structure · processed on your own machine' },
-  watermark:  { multiple: false, minFiles: 1, idle: 'Choose a PDF to watermark',        hint: 'Stamped diagonally across every page',
+  compress:   { multiple: false, minFiles: 1, idle: 'Choose a PDF to compress',         hint: 'Strips metadata and optimizes structure · processed on your own machine', accept: 'application/pdf' },
+  watermark:  { multiple: false, minFiles: 1, idle: 'Choose a PDF to watermark',        hint: 'Stamped diagonally across every page', accept: 'application/pdf',
     option: { type: 'text', id: 'text', placeholder: 'Watermark text, e.g. CONFIDENTIAL', default: 'CONFIDENTIAL' } },
-  extract:    { multiple: false, minFiles: 1, idle: 'Choose a PDF to pull pages from',  hint: 'Enter which pages you want first',
+  extract:    { multiple: false, minFiles: 1, idle: 'Choose a PDF to pull pages from',  hint: 'Enter which pages you want first', accept: 'application/pdf',
     option: { type: 'text', id: 'ranges', placeholder: 'Pages to extract, e.g. 1-3,5', default: '' } },
-  deletePages:{ multiple: false, minFiles: 1, idle: 'Choose a PDF to remove pages from', hint: 'Enter which pages to delete first',
+  deletePages:{ multiple: false, minFiles: 1, idle: 'Choose a PDF to remove pages from', hint: 'Enter which pages to delete first', accept: 'application/pdf',
     option: { type: 'text', id: 'pages', placeholder: 'Pages to delete, e.g. 2,4', default: '' } },
-  lock:       { multiple: false, minFiles: 1, idle: 'Choose a PDF to lock',             hint: 'Requires qpdf installed on your PC — see the tool\u2019s README',
+  lock:       { multiple: false, minFiles: 1, idle: 'Choose a PDF to lock',             hint: 'Requires qpdf installed on your PC — see the backend README', accept: 'application/pdf',
     option: { type: 'password', id: 'password', placeholder: 'Set a password', default: '' } },
-  unlock:     { multiple: false, minFiles: 1, idle: 'Choose a PDF to unlock',           hint: 'Requires qpdf installed on your PC — see the tool\u2019s README',
+  unlock:     { multiple: false, minFiles: 1, idle: 'Choose a PDF to unlock',           hint: 'Requires qpdf installed on your PC — see the backend README', accept: 'application/pdf',
     option: { type: 'password', id: 'password', placeholder: 'Enter the current password', default: '' } },
+  officeToPdf:{ multiple: false, minFiles: 1, idle: 'Choose a Word, Excel, or PowerPoint file', hint: 'Requires LibreOffice installed on your PC — see the backend README',
+    accept: '.docx,.doc,.xlsx,.xls,.pptx,.ppt' },
+  pdfToOffice:{ multiple: false, minFiles: 1, idle: 'Choose a PDF to convert',          hint: 'Requires LibreOffice installed on your PC — layouts may shift on complex files', accept: 'application/pdf',
+    option: { type: 'buttons', id: 'format', label: 'Convert to:', choices: [['docx','Word'],['xlsx','Excel'],['pptx','PowerPoint']], default: 'docx' } },
+  imagesToPdf:{ multiple: true,  minFiles: 1, idle: 'Choose one or more images',        hint: 'JPG or PNG · combined into a single PDF, one image per page', accept: 'image/jpeg,image/png' },
+  pdfToImages:{ multiple: false, minFiles: 1, idle: 'Choose a PDF to convert to images', hint: 'Requires Ghostscript installed on your PC — one PNG per page', accept: 'application/pdf' },
+  ocr:        { multiple: false, minFiles: 1, idle: 'Choose a scanned PDF',             hint: 'Requires Ghostscript + Tesseract installed — turns scans into searchable text', accept: 'application/pdf' },
 };
 
 const ENDPOINT = {
   merge: '/api/merge', split: '/api/split', rotate: '/api/rotate', compress: '/api/compress',
   watermark: '/api/watermark', extract: '/api/extract', deletePages: '/api/delete-pages',
-  lock: '/api/lock', unlock: '/api/unlock',
+  lock: '/api/lock', unlock: '/api/unlock', officeToPdf: '/api/office-to-pdf',
+  pdfToOffice: '/api/pdf-to-office', imagesToPdf: '/api/images-to-pdf',
+  pdfToImages: '/api/pdf-to-images', ocr: '/api/ocr',
 };
 
 function renderToolOptions() {
@@ -773,14 +787,17 @@ document.getElementById('toolTabs').addEventListener('click', (e) => {
   btn.classList.add('active');
   activeTool = btn.dataset.tool;
   renderToolOptions();
-  fileInput.multiple = TOOL_CONFIG[activeTool].multiple;
-  dzTitle.textContent = TOOL_CONFIG[activeTool].idle;
-  dzSub.textContent = TOOL_CONFIG[activeTool].hint;
+  const cfg = TOOL_CONFIG[activeTool];
+  fileInput.multiple = cfg.multiple;
+  fileInput.accept = cfg.accept;
+  dzTitle.textContent = cfg.idle;
+  dzSub.textContent = cfg.hint;
   selectedFiles = [];
   fileRows.innerHTML = '';
   resultRow.innerHTML = '';
 });
 renderToolOptions();
+fileInput.accept = TOOL_CONFIG[activeTool].accept;
 
 dropzone.addEventListener('click', () => fileInput.click());
 dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.style.borderColor = 'var(--violet)'; });
@@ -792,14 +809,19 @@ dropzone.addEventListener('drop', (e) => {
 });
 fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
 
+function fileMatchesAccept(file, acceptStr) {
+  const accepts = acceptStr.split(',').map(s => s.trim());
+  return accepts.some(a => a.startsWith('.') ? file.name.toLowerCase().endsWith(a) : file.type === a);
+}
+
 function handleFiles(fileList) {
-  selectedFiles = Array.from(fileList).filter(f => f.type === 'application/pdf');
-  renderFileRows();
   const cfg = TOOL_CONFIG[activeTool];
+  selectedFiles = Array.from(fileList).filter(f => fileMatchesAccept(f, cfg.accept));
+  renderFileRows();
   if (selectedFiles.length >= cfg.minFiles) {
     runTool();
   } else if (selectedFiles.length > 0) {
-    dzSub.textContent = `Add at least ${cfg.minFiles} PDF(s) for this tool`;
+    dzSub.textContent = `Add at least ${cfg.minFiles} matching file(s) for this tool`;
   }
 }
 
@@ -816,6 +838,7 @@ function renderFileRows() {
 const TOOL_LABEL = {
   merge: 'merged.pdf', rotate: 'rotated.pdf', watermark: 'watermarked.pdf',
   extract: 'extracted.pdf', deletePages: 'trimmed.pdf', lock: 'locked.pdf', unlock: 'unlocked.pdf',
+  officeToPdf: 'converted.pdf', imagesToPdf: 'images-to-pdf.pdf', ocr: 'ocr.pdf',
 };
 
 async function runTool() {
@@ -828,7 +851,7 @@ async function runTool() {
   const optValue = getToolOptionValue();
   const formData = new FormData();
 
-  if (activeTool === 'merge') {
+  if (activeTool === 'merge' || activeTool === 'imagesToPdf') {
     selectedFiles.forEach(f => formData.append('files', f));
   } else {
     formData.append('file', selectedFiles[0]);
@@ -837,6 +860,7 @@ async function runTool() {
     if (activeTool === 'extract') formData.append('ranges', optValue);
     if (activeTool === 'deletePages') formData.append('pages', optValue);
     if (activeTool === 'lock' || activeTool === 'unlock') formData.append('password', optValue);
+    if (activeTool === 'pdfToOffice') formData.append('format', optValue);
   }
 
   try {
@@ -846,11 +870,12 @@ async function runTool() {
 
     document.querySelectorAll('#fileRows .fstatus').forEach(el => { el.textContent = 'done'; });
 
-    if (activeTool === 'split') {
+    if (activeTool === 'split' || activeTool === 'pdfToImages') {
+      const ext = activeTool === 'split' ? 'pdf' : 'png';
       resultRow.innerHTML = data.urls.map((url, i) => `
         <div class="file-row" style="border-color:var(--teal);">
           <div class="fbadge" style="background:var(--grad-aurora)"></div>
-          <div><div class="fname">page-${i + 1}.pdf</div><div class="fmeta">1 of ${data.pageCount} pages</div></div>
+          <div><div class="fname">page-${i + 1}.${ext}</div><div class="fmeta">1 of ${data.pageCount} pages</div></div>
           <a class="fstatus" style="text-decoration:none;" href="${BACKEND_URL}${url}" target="_blank">download</a>
         </div>`).join('');
       dzTitle.textContent = `Done — ${data.pageCount} pages ready below`;
@@ -863,6 +888,14 @@ async function runTool() {
           <a class="fstatus" style="text-decoration:none;" href="${BACKEND_URL}${data.url}" target="_blank">download</a>
         </div>`;
       dzTitle.textContent = 'Done — download your compressed file below';
+    } else if (activeTool === 'pdfToOffice') {
+      resultRow.innerHTML = `
+        <div class="file-row" style="border-color:var(--teal);">
+          <div class="fbadge" style="background:var(--grad-aurora)"></div>
+          <div><div class="fname">converted.${optValue}</div><div class="fmeta">ready to download</div></div>
+          <a class="fstatus" style="text-decoration:none;" href="${BACKEND_URL}${data.url}" target="_blank">download</a>
+        </div>`;
+      dzTitle.textContent = 'Done — download your file below';
     } else {
       resultRow.innerHTML = `
         <div class="file-row" style="border-color:var(--teal);">
