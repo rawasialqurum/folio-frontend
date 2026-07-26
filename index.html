@@ -476,33 +476,24 @@
           <button class="btn btn-primary btn-sm">Upload file</button>
         </div>
 
-        <div class="dropzone">
-          <svg class="progress-ring" width="64" height="64" viewBox="0 0 64 64">
+        <div class="dropzone" id="dropzone">
+          <svg class="progress-ring" width="64" height="64" viewBox="0 0 64 64" id="progressRing" style="display:none;">
             <defs><linearGradient id="grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0%" stop-color="#7C6CF6"/><stop offset="100%" stop-color="#4FD1C5"/></linearGradient></defs>
             <circle class="track" cx="32" cy="32" r="26"></circle>
             <circle class="fill" cx="32" cy="32" r="26"></circle>
           </svg>
+          <svg id="idleIcon" width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" style="flex:none; color:var(--text-tertiary);">
+            <path d="M12 16V4M12 4l-4 4M12 4l4 4"/><path d="M4 16v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"/>
+          </svg>
           <div class="dropzone-text">
-            <h4>Drag &amp; drop files, or click to browse</h4>
-            <p>Supports PDF, DOCX, XLSX, PPTX, JPG, PNG · up to 100&nbsp;MB</p>
+            <h4 id="dzTitle">Choose 2 or more PDFs to merge</h4>
+            <p id="dzSub">They'll be combined in the order you select them · processed on your own machine</p>
           </div>
+          <input type="file" id="fileInput" accept="application/pdf" multiple style="display:none;">
         </div>
 
-        <div class="file-row">
-          <div class="fbadge" style="background:linear-gradient(135deg,#F2755C,#F2A15C)"></div>
-          <div><div class="fname">Q3-board-deck.pdf</div><div class="fmeta">4.2 MB · compressed</div></div>
-          <div class="fstatus">done</div>
-        </div>
-        <div class="file-row">
-          <div class="fbadge" style="background:var(--grad-aurora)"></div>
-          <div><div class="fname">contract-draft.docx → pdf</div><div class="fmeta">1.1 MB · converted</div></div>
-          <div class="fstatus">done</div>
-        </div>
-        <div class="file-row">
-          <div class="fbadge" style="background:linear-gradient(135deg,#4FD1C5,#4F9CF6)"></div>
-          <div><div class="fname">invoice-scans.zip</div><div class="fmeta">OCR · 8 pages</div></div>
-          <div class="fstatus">processing</div>
-        </div>
+        <div id="fileRows"></div>
+        <div id="resultRow"></div>
       </div>
     </div>
   </div>
@@ -684,6 +675,85 @@ document.getElementById('billingSwitch').addEventListener('click', function(){
   document.getElementById('yearlyLabel').style.fontWeight = yearly ? 600 : 500;
   renderPricing();
 });
+
+/* ---------------- Merge tool: real backend call ---------------- */
+const BACKEND_URL = "http://localhost:3001"; // change if you tunnel with ngrok later
+
+const dropzone = document.getElementById('dropzone');
+const fileInput = document.getElementById('fileInput');
+const fileRows = document.getElementById('fileRows');
+const resultRow = document.getElementById('resultRow');
+const idleIcon = document.getElementById('idleIcon');
+const progressRing = document.getElementById('progressRing');
+const dzTitle = document.getElementById('dzTitle');
+const dzSub = document.getElementById('dzSub');
+
+let selectedFiles = [];
+
+dropzone.addEventListener('click', () => fileInput.click());
+dropzone.addEventListener('dragover', (e) => { e.preventDefault(); dropzone.style.borderColor = 'var(--violet)'; });
+dropzone.addEventListener('dragleave', () => { dropzone.style.borderColor = ''; });
+dropzone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  dropzone.style.borderColor = '';
+  handleFiles(e.dataTransfer.files);
+});
+fileInput.addEventListener('change', (e) => handleFiles(e.target.files));
+
+function handleFiles(fileList) {
+  selectedFiles = Array.from(fileList).filter(f => f.type === 'application/pdf');
+  renderFileRows();
+  if (selectedFiles.length >= 2) {
+    mergeFiles();
+  } else if (selectedFiles.length === 1) {
+    dzSub.textContent = 'Add at least one more PDF to merge them';
+  }
+}
+
+function renderFileRows() {
+  fileRows.innerHTML = selectedFiles.map(f => `
+    <div class="file-row">
+      <div class="fbadge" style="background:linear-gradient(135deg,#F2755C,#F2A15C)"></div>
+      <div><div class="fname">${f.name}</div><div class="fmeta">${(f.size/1024/1024).toFixed(2)} MB</div></div>
+      <div class="fstatus">queued</div>
+    </div>
+  `).join('');
+}
+
+async function mergeFiles() {
+  idleIcon.style.display = 'none';
+  progressRing.style.display = 'block';
+  dzTitle.textContent = 'Merging on your local backend…';
+  dzSub.textContent = 'This calls the server running on your PC';
+  resultRow.innerHTML = '';
+
+  const formData = new FormData();
+  selectedFiles.forEach(f => formData.append('files', f));
+
+  try {
+    const res = await fetch(`${BACKEND_URL}/api/merge`, { method: 'POST', body: formData });
+    const data = await res.json();
+
+    if (!res.ok || !data.ok) throw new Error(data.error || 'Merge failed');
+
+    document.querySelectorAll('#fileRows .fstatus').forEach(el => { el.textContent = 'done'; });
+    resultRow.innerHTML = `
+      <div class="file-row" style="border-color:var(--teal);">
+        <div class="fbadge" style="background:var(--grad-aurora)"></div>
+        <div><div class="fname">merged.pdf</div><div class="fmeta">${selectedFiles.length} files combined</div></div>
+        <a class="fstatus" style="text-decoration:none;" href="${BACKEND_URL}${data.url}" target="_blank">download</a>
+      </div>`;
+    dzTitle.textContent = 'Done — download your merged file below';
+    dzSub.textContent = 'Choose new files to merge again';
+  } catch (err) {
+    dzTitle.textContent = 'Could not reach the backend';
+    dzSub.textContent = `Make sure "npm start" is running on your PC (${BACKEND_URL}) — ${err.message}`;
+  } finally {
+    idleIcon.style.display = 'block';
+    progressRing.style.display = 'none';
+    selectedFiles = [];
+  }
+}
 
 /* ---------------- Scroll reveals ---------------- */
 if(window.gsap && window.ScrollTrigger){
