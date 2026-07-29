@@ -245,7 +245,7 @@
     padding:22px; border-radius:var(--radius-md); border:1px solid var(--border-glass);
     background:var(--surface-glass); backdrop-filter:blur(12px);
     display:flex; flex-direction:column; gap:14px; transition:.32s cubic-bezier(.2,.8,.2,1);
-    position:relative; overflow:hidden;
+    position:relative; overflow:hidden; cursor:pointer;
   }
   .tool-card::before{
     content:""; position:absolute; inset:0; opacity:0; transition:opacity .35s ease;
@@ -491,6 +491,9 @@
           <button class="pill" data-tool="imagesToPdf">Images → PDF</button>
           <button class="pill" data-tool="pdfToImages">PDF → Images</button>
           <button class="pill" data-tool="ocr">OCR</button>
+          <button class="pill" data-tool="aiSummarize">AI Summary</button>
+          <button class="pill" data-tool="aiChat">Chat with PDF</button>
+          <button class="pill" data-tool="aiTranslate">AI Translate</button>
         </div>
 
         <div id="toolOptions" style="display:none; margin-bottom:16px;"></div>
@@ -637,7 +640,7 @@ const toolGrid = document.getElementById('toolGrid');
 function renderTools(cat){
   const list = cat === 'all' ? TOOLS : TOOLS.filter(t => t.cat === cat);
   toolGrid.innerHTML = list.map(t => `
-    <div class="tool-card">
+    <div class="tool-card" data-name="${t.name}">
       <div class="tool-icon">${icon(ICONS[t.icon])}</div>
       <div>
         <h4>${t.name}</h4>
@@ -656,6 +659,25 @@ document.getElementById('pillRow').addEventListener('click', (e) => {
   document.querySelectorAll('.pill').forEach(p => p.classList.remove('active'));
   btn.classList.add('active');
   renderTools(btn.dataset.cat);
+});
+
+const TOOL_NAME_TO_WORKSPACE = {
+  'PDF to Word': 'pdfToOffice', 'PDF to Excel': 'pdfToOffice', 'PDF to PowerPoint': 'pdfToOffice',
+  'PDF to JPG / PNG': 'pdfToImages', 'Word to PDF': 'officeToPdf', 'Images to PDF': 'imagesToPdf',
+  'Merge PDF': 'merge', 'Split PDF': 'split', 'Rotate pages': 'rotate', 'Delete pages': 'deletePages',
+  'Compress PDF': 'compress', 'Optimize for web': 'compress', 'Lock PDF': 'lock', 'Unlock PDF': 'unlock',
+  'Watermark PDF': 'watermark', 'OCR PDF': 'ocr',
+  'AI summary': 'aiSummarize', 'Chat with PDF': 'aiChat', 'AI translate': 'aiTranslate',
+};
+toolGrid.addEventListener('click', (e) => {
+  const card = e.target.closest('.tool-card');
+  if (!card) return;
+  const mappedTool = TOOL_NAME_TO_WORKSPACE[card.dataset.name];
+  document.getElementById('workspace').scrollIntoView({ behavior: 'smooth' });
+  if (mappedTool) {
+    const tabBtn = document.querySelector(`#toolTabs .pill[data-tool="${mappedTool}"]`);
+    if (tabBtn) tabBtn.click();
+  }
 });
 
 /* ---------------- Pricing ---------------- */
@@ -696,7 +718,7 @@ document.getElementById('billingSwitch').addEventListener('click', function(){
 });
 
 /* ---------------- Workspace tools: real backend calls ---------------- */
-const BACKEND_URL = "https://folio-backend-long-tidepool-8560.fly.dev"; // Cloudflare quick tunnel — changes if the tunnel is restarted
+const BACKEND_URL = "https://folio-backend-long-tidepool-8560.fly.dev";
 
 const dropzone = document.getElementById('dropzone');
 const fileInput = document.getElementById('fileInput');
@@ -711,8 +733,6 @@ const toolOptions = document.getElementById('toolOptions');
 let selectedFiles = [];
 let activeTool = 'merge';
 
-// Each tool: how many files it needs, idle copy, and an optional extra input
-// rendered above the dropzone (degrees / text / password).
 const TOOL_CONFIG = {
   merge:      { multiple: true,  minFiles: 2, idle: 'Choose 2 or more PDFs to merge',   hint: "They'll be combined in the order you select them · processed on your own machine", accept: 'application/pdf' },
   split:      { multiple: false, minFiles: 1, idle: 'Choose a PDF to split into pages', hint: 'Every page comes back as its own file · processed on your own machine', accept: 'application/pdf' },
@@ -736,6 +756,11 @@ const TOOL_CONFIG = {
   imagesToPdf:{ multiple: true,  minFiles: 1, idle: 'Choose one or more images',        hint: 'JPG or PNG · combined into a single PDF, one image per page', accept: 'image/jpeg,image/png' },
   pdfToImages:{ multiple: false, minFiles: 1, idle: 'Choose a PDF to convert to images', hint: 'Requires Ghostscript installed on your PC — one PNG per page', accept: 'application/pdf' },
   ocr:        { multiple: false, minFiles: 1, idle: 'Choose a scanned PDF',             hint: 'Requires Ghostscript + Tesseract installed — turns scans into searchable text', accept: 'application/pdf' },
+  aiSummarize:{ multiple: false, minFiles: 1, idle: 'Choose a PDF to summarize',        hint: 'Claude reads the document and gives you the key points', accept: 'application/pdf' },
+  aiChat:     { multiple: false, minFiles: 1, idle: 'Choose a PDF, then ask a question', hint: "Claude answers using only what's in the document", accept: 'application/pdf',
+    option: { type: 'text', id: 'question', placeholder: 'Ask a question about this document', default: '' } },
+  aiTranslate:{ multiple: false, minFiles: 1, idle: 'Choose a PDF to translate',        hint: 'Claude translates the full text into the language you choose', accept: 'application/pdf',
+    option: { type: 'text', id: 'language', placeholder: 'Target language, e.g. Spanish', default: 'Spanish' } },
 };
 
 const ENDPOINT = {
@@ -744,6 +769,7 @@ const ENDPOINT = {
   lock: '/api/lock', unlock: '/api/unlock', officeToPdf: '/api/office-to-pdf',
   pdfToOffice: '/api/pdf-to-office', imagesToPdf: '/api/images-to-pdf',
   pdfToImages: '/api/pdf-to-images', ocr: '/api/ocr',
+  aiSummarize: '/api/ai/summarize', aiChat: '/api/ai/chat', aiTranslate: '/api/ai/translate',
 };
 
 function renderToolOptions() {
@@ -861,6 +887,8 @@ async function runTool() {
     if (activeTool === 'deletePages') formData.append('pages', optValue);
     if (activeTool === 'lock' || activeTool === 'unlock') formData.append('password', optValue);
     if (activeTool === 'pdfToOffice') formData.append('format', optValue);
+    if (activeTool === 'aiChat') formData.append('question', optValue);
+    if (activeTool === 'aiTranslate') formData.append('language', optValue);
   }
 
   try {
@@ -896,6 +924,13 @@ async function runTool() {
           <a class="fstatus" style="text-decoration:none;" href="${BACKEND_URL}${data.url}" target="_blank">download</a>
         </div>`;
       dzTitle.textContent = 'Done — download your file below';
+    } else if (activeTool === 'aiSummarize' || activeTool === 'aiChat' || activeTool === 'aiTranslate') {
+      const text = data.summary || data.answer || data.translated || '';
+      resultRow.innerHTML = `
+        <div class="file-row" style="border-color:var(--teal); align-items:flex-start; white-space:pre-wrap; line-height:1.5;">
+          ${text.replace(/</g, '&lt;')}
+        </div>`;
+      dzTitle.textContent = 'Done';
     } else {
       resultRow.innerHTML = `
         <div class="file-row" style="border-color:var(--teal);">
